@@ -1,0 +1,15 @@
+{
+   "terraform": {
+   "backend": {
+   "s3": {
+   "acl": "bucket-owner-full-control",
+   "bucket": "orcid-terraform-state-devatmos",
+   "dynamodb_table": "terraform_state_lock_dynamo_devatmos",
+   "encrypt": true,
+   "key": "terraform.tfstate",
+   "region": "us-east-2",
+   "workspace_key_prefix": "s3-bucket"
+}
+}
+}
+}

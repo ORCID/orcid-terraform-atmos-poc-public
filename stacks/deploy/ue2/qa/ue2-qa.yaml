@@ -1,0 +1,24 @@
+terraform:
+  backend_type: s3
+  backend:
+    s3:
+      bucket: "orcid-terraform-state-qaatmos"
+      dynamodb_table: "terraform_state_lock_dynamo_qaatmos"
+      acl: "bucket-owner-full-control"
+      encrypt: true
+      key: "terraform.tfstate"
+      region: "us-east-2"
+
+vars:
+  stage: qa
+  environment: ue2
+
+components:
+  terraform:
+    s3-bucket-example:
+      metadata:
+        component: s3-bucket
+      vars:
+        region: us-east-2
+        name: atmos-s3-bucket-example
+

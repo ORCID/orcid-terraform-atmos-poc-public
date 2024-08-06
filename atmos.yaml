@@ -1,0 +1,297 @@
+# CLI config is loaded from the following locations (from lowest to highest priority):
+# system dir ('/usr/local/etc/atmos' on Linux, '%LOCALAPPDATA%/atmos' on Windows)
+# home dir (~/.atmos)
+# current directory
+# ENV vars
+# Command-line arguments
+#
+# It supports POSIX-style Globs for file names/paths (double-star '**' is supported)
+# https://en.wikipedia.org/wiki/Glob_(programming)
+
+# Base path for components, stacks and workflows configurations.
+# Can also be set using 'ATMOS_BASE_PATH' ENV var, or '--base-path' command-line argument.
+# Supports both absolute and relative paths.
+# If not provided or is an empty string, 'components.terraform.base_path', 'components.helmfile.base_path', 'stacks.base_path' and 'workflows.base_path'
+# are independent settings (supporting both absolute and relative paths).
+# If 'base_path' is provided, 'components.terraform.base_path', 'components.helmfile.base_path', 'stacks.base_path' and 'workflows.base_path'
+# are considered paths relative to 'base_path'.
+base_path: "./"
+
+components:
+  terraform:
+    # Optional `command` specifies the executable to be called by `atmos` when running Terraform commands
+    # If not defined, `terraform` is used
+    # Examples:
+    # command: terraform
+    # command: /usr/local/bin/terraform
+    # command: /usr/local/bin/terraform-1.8
+    # command: tofu
+    # command: /usr/local/bin/tofu-1.7.1
+    # Can also be set using 'ATMOS_COMPONENTS_TERRAFORM_COMMAND' ENV var, or '--terraform-command' command-line argument
+    command: terraform
+    # Can also be set using 'ATMOS_COMPONENTS_TERRAFORM_BASE_PATH' ENV var, or '--terraform-dir' command-line argument
+    # Supports both absolute and relative paths
+    base_path: "components/terraform"
+    # Can also be set using 'ATMOS_COMPONENTS_TERRAFORM_APPLY_AUTO_APPROVE' ENV var
+    apply_auto_approve: false
+    # Can also be set using 'ATMOS_COMPONENTS_TERRAFORM_DEPLOY_RUN_INIT' ENV var, or '--deploy-run-init' command-line argument
+    deploy_run_init: true
+    # Can also be set using 'ATMOS_COMPONENTS_TERRAFORM_INIT_RUN_RECONFIGURE' ENV var, or '--init-run-reconfigure' command-line argument
+    init_run_reconfigure: true
+    # Can also be set using 'ATMOS_COMPONENTS_TERRAFORM_AUTO_GENERATE_BACKEND_FILE' ENV var, or '--auto-generate-backend-file' command-line argument
+    auto_generate_backend_file: true
+
+stacks:
+  base_path: "stacks"
+
+  included_paths:
+    - "deploy/**/*"
+#  excluded_paths:
+#    - "**/_defaults.yaml"
+  name_pattern: "{environment}-{stage}"
+
+workflows:
+  base_path: "stacks/workflows"
+
+logs:
+  # Logs can be written to any file or any standard file descriptor, including `/dev/stdout`, `/dev/stderr` and `/dev/null`
+  file: "/dev/stderr"
+  # Supported log levels: Trace, Debug, Info, Warning, Off
+  level: Info
+
+# Custom CLI commands
+commands:
+  - name: tf
+    description: Execute 'terraform' commands
+    # subcommands
+    commands:
+      - name: plan
+        description: This command plans terraform components
+        arguments:
+          - name: component
+            description: Name of the component
+        flags:
+          - name: stack
+            shorthand: s
+            description: Name of the stack
+            required: true
+        env:
+          - key: ENV_VAR_1
+            value: ENV_VAR_1_value
+          - key: ENV_VAR_2
+            # 'valueCommand' is an external command to execute to get the value for the ENV var
+            # Either 'value' or 'valueCommand' can be specified for the ENV var, but not both
+            valueCommand: echo ENV_VAR_2_value
+        # steps support Go templates
+        steps:
+          - atmos terraform plan {{ .Arguments.component }} -s {{ .Flags.stack }}
+  - name: terraform
+    description: Execute 'terraform' commands
+    # subcommands
+    commands:
+      - name: provision
+        description: This command provisions terraform components
+        arguments:
+          - name: component
+            description: Name of the component
+        flags:
+          - name: stack
+            shorthand: s
+            description: Name of the stack
+            required: true
+        # ENV var values support Go templates
+        env:
+          - key: ATMOS_COMPONENT
+            value: "{{ .Arguments.component }}"
+          - key: ATMOS_STACK
+            value: "{{ .Flags.stack }}"
+        steps:
+          - atmos terraform plan $ATMOS_COMPONENT -s $ATMOS_STACK
+          - atmos terraform apply $ATMOS_COMPONENT -s $ATMOS_STACK
+  - name: show
+    description: Execute 'show' commands
+    # subcommands
+    commands:
+      - name: component
+        description: Execute 'show component' command
+        arguments:
+          - name: component
+            description: Name of the component
+        flags:
+          - name: stack
+            shorthand: s
+            description: Name of the stack
+            required: true
+        # ENV var values support Go templates and have access to {{ .ComponentConfig.xxx.yyy.zzz }} Go template variables
+        env:
+          - key: ATMOS_COMPONENT
+            value: "{{ .Arguments.component }}"
+          - key: ATMOS_STACK
+            value: "{{ .Flags.stack }}"
+          - key: ATMOS_STAGE
+            value: "{{ .ComponentConfig.vars.stage }}"
+        # If a custom command defines 'component_config' section with 'component' and 'stack', 'atmos' generates the config for the component in the stack
+        # and makes it available in {{ .ComponentConfig.xxx.yyy.zzz }} Go template variables,
+        # exposing all the component sections (which are also shown by 'atmos describe component' command)
+        component_config:
+          component: "{{ .Arguments.component }}"
+          stack: "{{ .Flags.stack }}"
+        # Steps support using Go templates and can access all configuration settings (e.g. {{ .ComponentConfig.xxx.yyy.zzz }})
+        # Steps also have access to the ENV vars defined in the 'env' section of the 'command'
+        steps:
+          - 'echo Atmos component from argument: "{{ .Arguments.component }}"'
+          - 'echo ATMOS_COMPONENT: "$ATMOS_COMPONENT"'
+          - 'echo Atmos stack: "{{ .Flags.stack }}"'
+          - 'echo Terraform component: "{{ .ComponentConfig.component }}"'
+          - 'echo Backend S3 bucket: "{{ .ComponentConfig.backend.bucket }}"'
+          - 'echo Terraform workspace: "{{ .ComponentConfig.workspace }}"'
+          - 'echo Environment: "{{ .ComponentConfig.vars.environment }}"'
+          - 'echo Stage: "{{ .ComponentConfig.vars.stage }}"'
+          - 'echo Dependencies: "{{ .ComponentConfig.deps }}"'
+          - 'echo settings.config.is_prod: "{{ .ComponentConfig.settings.config.is_prod }}"'
+          - 'echo ATMOS_IS_PROD: "$ATMOS_IS_PROD"'
+  - name: list
+    description: Execute 'atmos list' commands
+    # subcommands
+    commands:
+      - name: stacks
+        description: |
+          List all Atmos stacks.
+        steps:
+          - >
+            atmos describe stacks --sections none | grep -e "^\S" | sed s/://g
+      - name: components
+        description: |
+          List all Atmos components in all stacks or in a single stack.
+
+          Example usage:
+            atmos list components
+            atmos list components -s plat-ue2-dev
+            atmos list components --stack plat-uw2-prod
+            atmos list components -s plat-ue2-dev --type abstract
+            atmos list components -s plat-ue2-dev -t enabled
+            atmos list components -s plat-ue2-dev -t disabled
+        flags:
+          - name: stack
+            shorthand: s
+            description: Name of the stack
+            required: false
+          - name: type
+            shorthand: t
+            description: Component types - abstract, enabled, or disabled
+            required: false
+        steps:
+          - >
+            {{ if .Flags.stack }}
+              {{ if eq .Flags.type "enabled" }}
+                atmos describe stacks --stack {{ .Flags.stack }} --format json | jq '.[].components.terraform | to_entries[] | select(.value.vars.enabled == true)' | jq -r .key
+              {{ else if eq .Flags.type "disabled" }}
+                atmos describe stacks --stack {{ .Flags.stack }} --format json | jq '.[].components.terraform | to_entries[] | select(.value.vars.enabled == false)' | jq -r .key
+              {{ else if eq .Flags.type "abstract" }}
+                atmos describe stacks --stack {{ .Flags.stack }} --format json | jq '.[].components.terraform | to_entries[] | select(.value.metadata.type == "abstract")' | jq -r .key
+              {{ else }}
+                atmos describe stacks --stack {{ .Flags.stack }} --format json --sections none | jq ".[].components.terraform" | jq -s add | jq -r "keys[]"
+              {{ end }}
+            {{ else }}
+              {{ if eq .Flags.type "enabled" }}
+                atmos describe stacks --format json | jq '.[].components.terraform | to_entries[] | select(.value.vars.enabled == true)' | jq -r '[.key]' | jq -s 'add' | jq 'unique | sort' | jq -r "values[]"
+              {{ else if eq .Flags.type "disabled" }}
+                atmos describe stacks --format json | jq '.[].components.terraform | to_entries[] | select(.value.vars.enabled == false)' | jq -r '[.key]' | jq -s 'add' | jq 'unique | sort' | jq -r "values[]"
+              {{ else if eq .Flags.type "abstract" }}
+                atmos describe stacks --format json | jq '.[].components.terraform | to_entries[] | select(.value.metadata.type == "abstract")' | jq -r '[.key]' | jq -s 'add' | jq 'unique | sort' | jq -r "values[]"
+              {{ else }}
+                atmos describe stacks --format json --sections none | jq ".[].components.terraform" | jq -s add | jq -r "keys[]"
+              {{ end }}
+            {{ end }}
+
+# Integrations
+integrations:
+
+  # Atlantis integration
+  # https://www.runatlantis.io/docs/repo-level-atlantis-yaml.html
+  atlantis:
+    # Path and name of the Atlantis config file 'atlantis.yaml'
+    # Supports absolute and relative paths
+    # All the intermediate folders will be created automatically (e.g. 'path: /config/atlantis/atlantis.yaml')
+    # Can be overridden on the command line by using '--output-path' command-line argument in 'atmos atlantis generate repo-config' command
+    # If not specified (set to an empty string/omitted here, and set to an empty string on the command line), the content of the file will be dumped to 'stdout'
+    # On Linux/macOS, you can also use '--output-path=/dev/stdout' to dump the content to 'stdout' without setting it to an empty string in 'atlantis.path'
+    path: "atlantis.yaml"
+
+    # Config templates
+    # Select a template by using the '--config-template <config_template>' command-line argument in 'atmos atlantis generate repo-config' command
+    config_templates:
+      config-1:
+        version: 3
+        automerge: true
+        delete_source_branch_on_merge: true
+        parallel_plan: true
+        parallel_apply: true
+        allowed_regexp_prefixes:
+          - dev/
+          - staging/
+          - prod/
+
+    # Project templates
+    # Select a template by using the '--project-template <project_template>' command-line argument in 'atmos atlantis generate repo-config' command
+    project_templates:
+      project-1:
+        # generate a project entry for each component in every stack
+        name: "{tenant}-{environment}-{stage}-{component}"
+        workspace: "{workspace}"
+        dir: "{component-path}"
+        terraform_version: v1.2
+        delete_source_branch_on_merge: true
+        autoplan:
+          enabled: true
+          when_modified:
+            - "**/*.tf"
+            - "varfiles/$PROJECT_NAME.tfvars.json"
+        apply_requirements:
+          - "approved"
+
+    # Workflow templates
+    # https://www.runatlantis.io/docs/custom-workflows.html#custom-init-plan-apply-commands
+    # https://www.runatlantis.io/docs/custom-workflows.html#custom-run-command
+    workflow_templates:
+      workflow-1:
+        plan:
+          steps:
+            - run: terraform init -input=false
+            # When using workspaces, you need to select the workspace using the $WORKSPACE environment variable
+            - run: terraform workspace select $WORKSPACE || terraform workspace new $WORKSPACE
+            # You must output the plan using '-out $PLANFILE' because Atlantis expects plans to be in a specific location
+            - run: terraform plan -input=false -refresh -out $PLANFILE -var-file varfiles/$PROJECT_NAME.tfvars.json
+        apply:
+          steps:
+            - run: terraform apply $PLANFILE
+
+# `Go` templates in Atmos manifests
+# https://atmos.tools/core-concepts/stacks/templates
+# https://pkg.go.dev/text/template
+templates:
+  settings:
+    enabled: true
+    evaluations: 1
+    # https://masterminds.github.io/sprig
+    sprig:
+      enabled: true
+    # https://docs.gomplate.ca
+    gomplate:
+      enabled: true
+      timeout: 5
+      # https://docs.gomplate.ca/datasources
+      datasources: {}
+
+settings:
+  # `list_merge_strategy` specifies how lists are merged in Atmos stack manifests.
+  # Can also be set using 'ATMOS_SETTINGS_LIST_MERGE_STRATEGY' environment variable, or '--settings-list-merge-strategy' command-line argument
+  # The following strategies are supported:
+  # `replace`: Most recent list imported wins (the default behavior).
+  # `append`:  The sequence of lists is appended in the same order as imports.
+  # `merge`:   The items in the destination list are deep-merged with the items in the source list.
+  #            The items in the source list take precedence.
+  #            The items are processed starting from the first up to the length of the source list (the remaining items are not processed).
+  #            If the source and destination lists have the same length, all items in the destination lists are
+  #            deep-merged with all items in the source list.
+  list_merge_strategy: replace

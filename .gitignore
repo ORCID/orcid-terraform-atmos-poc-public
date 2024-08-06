@@ -1,0 +1,4 @@
+**/.terraform/**
+**/*.planfile
+**/.*.swp
+**/*terraform.tfvars.json
